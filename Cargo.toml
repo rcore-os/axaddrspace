@@ -5,7 +5,8 @@ edition = "2021"
 description = "ArceOS-Hypervisor guest address space management module"
 
 [dependencies]
-log = "0.4"
+log = "0.4.22"
+
 cfg-if = "1.0"
 lazyinit = "0.2"
 bitflags = "2.2"
