@@ -34,3 +34,17 @@ fn mapping_err_to_ax_err(err: MappingError) -> AxError {
         MappingError::BadState => AxError::BadState,
     }
 }
+
+pub trait EPTTranslator {
+    /// Converts a guest physical address to a host physical address
+    /// through Nested Page Table (NPT) translation.
+    ///
+    /// # Parameters
+    ///
+    /// * `gpa` - The guest physical address to convert.
+    ///
+    /// # Returns
+    ///
+    /// * `HostPhysAddr` - The corresponding host physical address.
+    fn guest_phys_to_host_phys(gpa: GuestPhysAddr) -> Option<HostPhysAddr>;
+}

@@ -12,6 +12,19 @@ def_usize_addr! {
     pub type GuestPhysAddr;
 }
 
+/// Note: This is just a conversion in number and has no semantic meaning.
+///
+/// Why we need this conversion?
+/// Because `GenericPTE` provided by `page_table_entry::x86_64` only accepts `PhysAddr` as the physical address type.
+/// Introduce `GuestPhysAddr` concept into `GenericPTE` will bring a lot of complexity.
+///
+/// I just implement this ugly conversion to make things work.
+impl From<PhysAddr> for GuestPhysAddr {
+    fn from(addr: PhysAddr) -> Self {
+        Self::from_usize(addr.into())
+    }
+}
+
 def_usize_addr_formatter! {
     GuestVirtAddr = "GVA:{}";
     GuestPhysAddr = "GPA:{}";
