@@ -2,6 +2,8 @@ cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
         /// The architecture-specific nested page table for two-stage address translation.
         pub type NestedPageTable<H> = arch::ExtendedPageTable<H>;
+        pub type EPTEntry = arch::EPTEntry;
+        pub type EPTMetadata = arch::ExtendedPageTableMetadata;
     } else if #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))] {
         /// The architecture-specific page table.
         pub type NestedPageTable<H> = arch::NestedPageTable<H>;

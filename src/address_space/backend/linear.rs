@@ -1,10 +1,9 @@
-use memory_addr::PhysAddr;
-use page_table_multiarch::{MappingFlags, PagingHandler};
+use memory_addr::{MemoryAddr, PhysAddr};
+use page_table_multiarch::{GenericPTE, MappingFlags, PageTable64, PagingHandler, PagingMetaData};
 
 use super::Backend;
-use crate::{GuestPhysAddr, npt::NestedPageTable as PageTable};
 
-impl<H: PagingHandler> Backend<H> {
+impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> Backend<M, PTE, H> {
     /// Creates a new linear mapping backend.
     pub const fn new_linear(pa_va_offset: usize) -> Self {
         Self::Linear { pa_va_offset }
@@ -12,27 +11,27 @@ impl<H: PagingHandler> Backend<H> {
 
     pub(crate) fn map_linear(
         &self,
-        start: GuestPhysAddr,
+        start: M::VirtAddr,
         size: usize,
         flags: MappingFlags,
-        pt: &mut PageTable<H>,
+        pt: &mut PageTable64<M, PTE, H>,
         pa_va_offset: usize,
     ) -> bool {
-        let pa_start = PhysAddr::from(start.as_usize() - pa_va_offset);
+        let pa_start = PhysAddr::from(start.into() - pa_va_offset);
         debug!(
             "map_linear: [{:#x}, {:#x}) -> [{:#x}, {:#x}) {:?}",
             start,
-            start + size,
+            start.add(size),
             pa_start,
             pa_start + size,
             flags
         );
         pt.map_region(
             start,
-            |va| PhysAddr::from(va.as_usize() - pa_va_offset),
+            |va| PhysAddr::from(va.into() - pa_va_offset),
             size,
             flags,
-            false,
+            true,
             false,
         )
         .is_ok()
@@ -40,12 +39,12 @@ impl<H: PagingHandler> Backend<H> {
 
     pub(crate) fn unmap_linear(
         &self,
-        start: GuestPhysAddr,
+        start: M::VirtAddr,
         size: usize,
-        pt: &mut PageTable<H>,
+        pt: &mut PageTable64<M, PTE, H>,
         _pa_va_offset: usize,
     ) -> bool {
-        debug!("unmap_linear: [{:#x}, {:#x})", start, start + size);
+        debug!("unmap_linear: [{:#x}, {:#x})", start, start.add(size));
         pt.unmap_region(start, size, true).is_ok()
     }
 }

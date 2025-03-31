@@ -9,7 +9,9 @@ extern crate alloc;
 
 mod addr;
 mod address_space;
-mod npt;
+/// Todo: this has to be combined with page_table_multiarch with `nested_page_table` feature,
+/// or separated into a new crate maybe named as `nested_page_table_multiarch`.
+pub mod npt;
 
 pub use addr::*;
 pub use address_space::*;
