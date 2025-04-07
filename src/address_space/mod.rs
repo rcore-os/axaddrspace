@@ -4,7 +4,7 @@ use core::fmt;
 use axerrno::{AxError, AxResult, ax_err};
 use memory_addr::{AddrRange, MemoryAddr, PhysAddr, is_aligned_4k};
 use memory_set::{MemoryArea, MemorySet};
-use page_table_multiarch::{GenericPTE, PageTable64, PagingHandler, PagingMetaData};
+use page_table_multiarch::{GenericPTE, PageSize, PageTable64, PagingHandler, PagingMetaData};
 
 use crate::mapping_err_to_ax_err;
 
@@ -185,17 +185,11 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
     /// Translates the given `VirtAddr` into `PhysAddr`.
     ///
     /// Returns `None` if the virtual address is out of range or not mapped.
-    pub fn translate(&self, vaddr: M::VirtAddr) -> Option<PhysAddr> {
+    pub fn translate(&self, vaddr: M::VirtAddr) -> Option<(PhysAddr, MappingFlags, PageSize)> {
         if !self.va_range.contains(vaddr) {
             return None;
         }
-        self.pt
-            .query(vaddr)
-            .map(|(phys_addr, _, _)| {
-                // debug!("vaddr {:?} translate to {:?}", vaddr, phys_addr);
-                phys_addr
-            })
-            .ok()
+        self.pt.query(vaddr).ok()
     }
 
     /// Translate&Copy the given `VirtAddr` with LENGTH len to a mutable u8 Vec through page table.
