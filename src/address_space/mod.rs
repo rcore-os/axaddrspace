@@ -261,7 +261,15 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
         }
     }
 }
+impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> {
+    pub fn clone(&self) -> AxResult<Self> {
+        let cloned_aspace = Self::new_empty(self.base(), self.size())?;
 
+        Ok(cloned_aspace)
+    }
+}
+
+#[allow(unused)]
 impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("AddrSpace")
@@ -272,6 +280,7 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
     }
 }
 
+#[allow(unused)]
 impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> {
     fn drop(&mut self) {
         self.clear();

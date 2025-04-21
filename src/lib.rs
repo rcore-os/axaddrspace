@@ -48,5 +48,7 @@ pub trait EPTTranslator {
     /// # Returns
     ///
     /// * `HostPhysAddr` - The corresponding host physical address.
-    fn guest_phys_to_host_phys(gpa: GuestPhysAddr) -> Option<HostPhysAddr>;
+    fn guest_phys_to_host_phys(
+        gpa: GuestPhysAddr,
+    ) -> Option<(HostPhysAddr, MappingFlags, page_table_multiarch::PageSize)>;
 }
