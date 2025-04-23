@@ -1,5 +1,6 @@
 //! Memory mapping backends.
 
+use memory_addr::MemoryAddr;
 use memory_set::MappingBackend;
 use page_table_multiarch::{GenericPTE, MappingFlags, PageTable64, PagingHandler, PagingMetaData};
 
@@ -87,13 +88,15 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> MappingBackend for Ba
 
     fn protect(
         &self,
-        _start: M::VirtAddr,
-        _size: usize,
-        _new_flags: MappingFlags,
-        _page_table: &mut Self::PageTable,
+        start: M::VirtAddr,
+        size: usize,
+        new_flags: MappingFlags,
+        page_table: &mut Self::PageTable,
     ) -> bool {
-        // a stub here
-        true
+        page_table
+            .protect_region(start, size, new_flags, true)
+            .map(|tlb| tlb.ignore())
+            .is_ok()
     }
 }
 

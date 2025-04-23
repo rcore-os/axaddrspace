@@ -174,8 +174,9 @@ impl PagingMetaData for ExtendedPageTableMetadata {
 
     type VirtAddr = GuestPhysAddr;
 
-    fn flush_tlb(_vaddr: Option<GuestPhysAddr>) {
-        todo!()
+    fn flush_tlb(vaddr: Option<GuestPhysAddr>) {
+        // todo!()
+        warn!("flush_tlb {:?} not implemented", vaddr);
     }
 }
 

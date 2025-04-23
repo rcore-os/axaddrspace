@@ -77,7 +77,14 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
         allow_huge: bool,
     ) -> AxResult {
         if !self.contains_range(start_vaddr, size) {
-            return ax_err!(InvalidInput, "address out of range");
+            return ax_err!(
+                InvalidInput,
+                alloc::format!(
+                    "[{:?} {:?}]address out of range",
+                    start_vaddr,
+                    start_vaddr.add(size)
+                )
+            );
         }
         if !start_vaddr.is_aligned_4k() || !start_paddr.is_aligned_4k() || !is_aligned_4k(size) {
             return ax_err!(InvalidInput, "address not aligned");
