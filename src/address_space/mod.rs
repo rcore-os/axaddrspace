@@ -2,9 +2,11 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use axerrno::{AxError, AxResult, ax_err};
-use memory_addr::{AddrRange, MemoryAddr, PhysAddr, is_aligned_4k};
+use memory_addr::{AddrRange, MemoryAddr, PAGE_SIZE_4K, PhysAddr, is_aligned_4k};
 use memory_set::{MemoryArea, MemorySet};
-use page_table_multiarch::{GenericPTE, PageSize, PageTable64, PagingHandler, PagingMetaData};
+use page_table_multiarch::{
+    GenericPTE, PageSize, PageTable64, PagingError, PagingHandler, PagingMetaData,
+};
 
 use crate::mapping_err_to_ax_err;
 
@@ -72,6 +74,7 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
         start_paddr: PhysAddr,
         size: usize,
         flags: MappingFlags,
+        allow_huge: bool,
     ) -> AxResult {
         if !self.contains_range(start_vaddr, size) {
             return ax_err!(InvalidInput, "address out of range");
@@ -81,7 +84,12 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
         }
 
         let offset = start_vaddr.into() - start_paddr.as_usize();
-        let area = MemoryArea::new(start_vaddr, size, flags, Backend::new_linear(offset));
+        let area = MemoryArea::new(
+            start_vaddr,
+            size,
+            flags,
+            Backend::new_linear(offset, allow_huge),
+        );
         self.areas
             .map(area, &mut self.pt, false)
             .map_err(mapping_err_to_ax_err)?;
@@ -261,11 +269,118 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
         }
     }
 }
+
 impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> {
     pub fn clone(&self) -> AxResult<Self> {
-        let cloned_aspace = Self::new_empty(self.base(), self.size())?;
+        let mut cloned_aspace = Self::new_empty(self.base(), self.size())?;
+
+        for area in self.areas.iter() {
+            let new_backend = area.backend().clone();
+            let new_area = MemoryArea::new(area.start(), area.size(), area.flags(), new_backend);
+
+            cloned_aspace
+                .areas
+                .map(new_area, &mut cloned_aspace.pt, false)
+                .map_err(mapping_err_to_ax_err)?;
+
+            match area.backend() {
+                Backend::Alloc { .. } => {
+                    // Alloc mappings are cloned.
+                    // They are created in the new address space.
+                    // The physical frames are copied to the new address space.
+                    let mut addr = area.start();
+                    let end = addr.add(area.size());
+                    while addr < end {
+                        match self.pt.query(addr) {
+                            Ok((phys_addr, _, page_size)) => {
+                                if !addr.is_aligned(page_size as usize) {
+                                    warn!(
+                                        "AddrSpace clone: addr {:#x} is not aligned to page size {:?}",
+                                        addr, page_size
+                                    );
+                                }
+                                let mut end_va = addr.align_down(page_size).add(page_size.into());
+                                end_va = end_va.min(end);
+
+                                // Copy the physical frames to the new address space.
+                                let new_phys_addr = match cloned_aspace.pt.query(addr) {
+                                    Ok((new_phys_addr, _, new_pgsize)) => {
+                                        if page_size != new_pgsize {
+                                            warn!(
+                                                "AddrSpace clone: addr {:#x} page size mismatch {:?} != {:?}",
+                                                addr, page_size, new_pgsize
+                                            );
+                                        }
+                                        new_phys_addr
+                                    }
+                                    Err(PagingError::NotMapped) => {
+                                        // The address is not mapped in the new address space.
+                                        // map it!
+                                        if !cloned_aspace.handle_page_fault(addr, area.flags()) {
+                                            warn!(
+                                                "AddrSpace clone: addr {:#x} handle page fault failed, check why?",
+                                                addr
+                                            );
+                                        }
+
+                                        match cloned_aspace.pt.query(addr) {
+                                            Ok((new_phys_addr, _, new_pgsize)) => {
+                                                if page_size != new_pgsize {
+                                                    warn!(
+                                                        "AddrSpace clone: addr {:#x} page size mismatch {:?} != {:?}",
+                                                        addr, page_size, new_pgsize
+                                                    );
+                                                }
+                                                new_phys_addr
+                                            }
+                                            Err(_) => {
+                                                warn!(
+                                                    "AddrSpace clone: addr {:#x} is not mapped",
+                                                    addr
+                                                );
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        warn!("AddrSpace clone: addr {:#x} is not mapped", addr);
+                                        continue;
+                                    }
+                                };
+
+                                unsafe {
+                                    core::ptr::copy_nonoverlapping(
+                                        H::phys_to_virt(phys_addr).as_ptr(),
+                                        H::phys_to_virt(new_phys_addr).as_mut_ptr(),
+                                        page_size as usize,
+                                    )
+                                };
+
+                                addr = end_va;
+                            }
+                            Err(PagingError::NotMapped) => {
+                                // The address is not mapped in the original address space.
+                                // Step forward to the next 4K page.
+                                addr = addr.add(PAGE_SIZE_4K);
+                            }
+                            Err(_) => {
+                                warn!("AddrSpace clone: addr {:#x} is not mapped", addr);
+                            }
+                        }
+                    }
+                }
+                Backend::Linear { .. } => {
+                    // Linear mappings are not cloned.
+                    // They are created in the new address space.
+                }
+            }
+        }
 
         Ok(cloned_aspace)
+    }
+
+    pub fn clone_cow(&mut self) -> AxResult<Self> {
+        unimplemented!()
     }
 }
 

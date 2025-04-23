@@ -23,6 +23,7 @@ pub enum Backend<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> {
     Linear {
         /// `vaddr - paddr`.
         pa_va_offset: usize,
+        allow_huge: bool,
     },
     /// Allocation mapping backend.
     ///
@@ -41,7 +42,13 @@ pub enum Backend<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> {
 impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> Clone for Backend<M, PTE, H> {
     fn clone(&self) -> Self {
         match *self {
-            Self::Linear { pa_va_offset } => Self::Linear { pa_va_offset },
+            Self::Linear {
+                pa_va_offset,
+                allow_huge,
+            } => Self::Linear {
+                pa_va_offset,
+                allow_huge,
+            },
             Self::Alloc { populate, .. } => Self::Alloc {
                 populate,
                 _phantom: core::marker::PhantomData,
@@ -63,14 +70,17 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> MappingBackend for Ba
         pt: &mut Self::PageTable,
     ) -> bool {
         match *self {
-            Self::Linear { pa_va_offset } => self.map_linear(start, size, flags, pt, pa_va_offset),
+            Self::Linear {
+                pa_va_offset,
+                allow_huge,
+            } => self.map_linear(start, size, flags, pt, allow_huge, pa_va_offset),
             Self::Alloc { populate, .. } => self.map_alloc(start, size, flags, pt, populate),
         }
     }
 
     fn unmap(&self, start: M::VirtAddr, size: usize, pt: &mut Self::PageTable) -> bool {
         match *self {
-            Self::Linear { pa_va_offset } => self.unmap_linear(start, size, pt, pa_va_offset),
+            Self::Linear { pa_va_offset, .. } => self.unmap_linear(start, size, pt, pa_va_offset),
             Self::Alloc { populate, .. } => self.unmap_alloc(start, size, pt, populate),
         }
     }

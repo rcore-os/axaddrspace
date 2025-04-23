@@ -5,8 +5,11 @@ use super::Backend;
 
 impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> Backend<M, PTE, H> {
     /// Creates a new linear mapping backend.
-    pub const fn new_linear(pa_va_offset: usize) -> Self {
-        Self::Linear { pa_va_offset }
+    pub const fn new_linear(pa_va_offset: usize, allow_huge: bool) -> Self {
+        Self::Linear {
+            pa_va_offset,
+            allow_huge,
+        }
     }
 
     pub(crate) fn map_linear(
@@ -15,6 +18,7 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> Backend<M, PTE, H> {
         size: usize,
         flags: MappingFlags,
         pt: &mut PageTable64<M, PTE, H>,
+        allow_huge: bool,
         pa_va_offset: usize,
     ) -> bool {
         let pa_start = PhysAddr::from(start.into() - pa_va_offset);
@@ -31,7 +35,7 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> Backend<M, PTE, H> {
             |va| PhysAddr::from(va.into() - pa_va_offset),
             size,
             flags,
-            true,
+            allow_huge,
             false,
         )
         .is_ok()
