@@ -98,7 +98,7 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
             Backend::new_linear(offset, allow_huge),
         );
         self.areas
-            .map(area, &mut self.pt, false)
+            .map(area, &mut self.pt, true)
             .map_err(mapping_err_to_ax_err)?;
         Ok(())
     }

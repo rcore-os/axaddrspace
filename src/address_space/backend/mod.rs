@@ -93,6 +93,13 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> MappingBackend for Ba
         new_flags: MappingFlags,
         page_table: &mut Self::PageTable,
     ) -> bool {
+        debug!(
+            "protect_region({:#x}) [{:#x}, {:#x}) {:?}",
+            page_table.root_paddr(),
+            start,
+            start.add(size),
+            new_flags,
+        );
         page_table
             .protect_region(start, size, new_flags, true)
             .map(|tlb| tlb.ignore())

@@ -176,9 +176,39 @@ impl PagingMetaData for ExtendedPageTableMetadata {
 
     fn flush_tlb(vaddr: Option<GuestPhysAddr>) {
         // todo!()
-        warn!("flush_tlb {:?} not implemented", vaddr);
+        debug!("flush_tlb {:?}", vaddr);
+        unsafe {
+            invept(InvEptType::Global);
+        }
     }
 }
 
 /// The VMX extended page table. (SDM Vol. 3C, Section 29.3)
 pub type ExtendedPageTable<H> = PageTable64<ExtendedPageTableMetadata, EPTEntry, H>;
+
+/// INVEPT type. (SDM Vol. 3C, Section 30.3)
+#[repr(u64)]
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum InvEptType {
+    /// The logical processor invalidates all mappings associated with bits
+    /// 51:12 of the EPT pointer (EPTP) specified in the INVEPT descriptor.
+    /// It may invalidate other mappings as well.
+    SingleContext = 1,
+    /// The logical processor invalidates mappings associated with all EPTPs.
+    Global = 2,
+}
+
+/// Invalidate Translations Derived from EPT. (SDM Vol. 3C, Section 30.3)
+///
+/// Invalidates mappings in the translation lookaside buffers (TLBs) and
+/// paging-structure caches that were derived from extended page tables (EPT).
+/// (See Chapter 28, “VMX Support for Address Translation”.) Invalidation is
+/// based on the INVEPT type specified in the register operand and the INVEPT
+/// descriptor specified in the memory operand.
+pub unsafe fn invept(inv_type: InvEptType) {
+    let invept_desc = [0, 0];
+    unsafe {
+        core::arch::asm!("invept {0}, [{1}]", in(reg) inv_type as u64, in(reg) &invept_desc);
+    }
+}
