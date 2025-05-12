@@ -4,6 +4,7 @@ cfg_if::cfg_if! {
         pub type NestedPageTable<H> = arch::ExtendedPageTable<H>;
         pub type EPTEntry = arch::EPTEntry;
         pub type EPTMetadata = arch::ExtendedPageTableMetadata;
+        pub use arch::EPTPointer;
     } else if #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))] {
         /// The architecture-specific page table.
         pub type NestedPageTable<H> = arch::NestedPageTable<H>;

@@ -1,6 +1,8 @@
 use core::{convert::TryFrom, fmt};
 
 use bit_field::BitField;
+use bitflags::bitflags;
+use memory_addr::PAGE_SIZE_4K;
 use page_table_entry::{GenericPTE, MappingFlags};
 use page_table_multiarch::{PageTable64, PagingMetaData};
 
@@ -174,9 +176,8 @@ impl PagingMetaData for ExtendedPageTableMetadata {
 
     type VirtAddr = GuestPhysAddr;
 
-    fn flush_tlb(vaddr: Option<GuestPhysAddr>) {
-        // todo!()
-        debug!("flush_tlb {:?}", vaddr);
+    fn flush_tlb(_vaddr: Option<GuestPhysAddr>) {
+        // Todo: more efficient way to flush TLB.
         unsafe {
             invept(InvEptType::Global);
         }
@@ -210,5 +211,52 @@ pub unsafe fn invept(inv_type: InvEptType) {
     let invept_desc = [0, 0];
     unsafe {
         core::arch::asm!("invept {0}, [{1}]", in(reg) inv_type as u64, in(reg) &invept_desc);
+    }
+}
+
+bitflags! {
+    /// Extended-Page-Table Pointer. (SDM Vol. 3C, Section 24.6.11)
+    #[derive(Clone, Copy)]
+    pub struct EPTPointer: u64 {
+        /// EPT paging-structure memory type: Uncacheable (UC).
+        #[allow(clippy::identity_op)]
+        const MEM_TYPE_UC = 0 << 0;
+        /// EPT paging-structure memory type: Write-back (WB).
+        #[allow(clippy::identity_op)]
+        const MEM_TYPE_WB = 6 << 0;
+        /// EPT page-walk length 1.
+        const WALK_LENGTH_1 = 0 << 3;
+        /// EPT page-walk length 2.
+        const WALK_LENGTH_2 = 1 << 3;
+        /// EPT page-walk length 3.
+        const WALK_LENGTH_3 = 2 << 3;
+        /// EPT page-walk length 4.
+        const WALK_LENGTH_4 = 3 << 3;
+        /// EPT page-walk length 5
+        const WALK_LENGTH_5 = 4 << 3;
+        /// Setting this control to 1 enables accessed and dirty flags for EPT.
+        const ENABLE_ACCESSED_DIRTY = 1 << 6;
+    }
+}
+
+impl EPTPointer {
+    pub fn from_table_phys(pml4_paddr: HostPhysAddr) -> Self {
+        let aligned_addr = pml4_paddr.as_usize() & !(PAGE_SIZE_4K - 1);
+        let flags = Self::from_bits_retain(aligned_addr as u64);
+        flags | Self::MEM_TYPE_WB | Self::WALK_LENGTH_4 | Self::ENABLE_ACCESSED_DIRTY
+    }
+
+    pub fn into_ept_root(&self) -> HostPhysAddr {
+        const PHYS_ADDR_MASK: usize = 0x000f_ffff_ffff_f000; // bits 12..52
+        HostPhysAddr::from(self.bits() as usize & PHYS_ADDR_MASK)
+    }
+}
+
+impl fmt::Debug for EPTPointer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("EPTPointer")
+            .field("raw", &self.0)
+            .field("ept_root", &self.into_ept_root())
+            .finish()
     }
 }
