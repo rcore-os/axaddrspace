@@ -170,7 +170,7 @@ impl<H: PagingHandler> AddrSpace<H> {
         self.pt
             .query(vaddr)
             .map(|(phys_addr, _, _)| {
-                debug!("vaddr {:?} translate to {:?}", vaddr, phys_addr);
+                trace!("vaddr {:?} translate to {:?}", vaddr, phys_addr);
                 phys_addr
             })
             .ok()
