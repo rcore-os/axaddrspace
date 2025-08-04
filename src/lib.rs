@@ -13,12 +13,15 @@ pub mod device;
 mod frame;
 mod hal;
 mod npt;
+mod accessor;
 
 pub use addr::*;
 pub use address_space::*;
 
 pub use frame::PhysFrame;
 pub use hal::AxMmHal;
+
+pub use accessor::{AddressTranslator, GuestMemoryAccessor};
 
 use axerrno::AxError;
 use memory_set::MappingError;
