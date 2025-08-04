@@ -96,7 +96,7 @@ impl<T: AddressTranslator> GuestMemoryAccessor<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{mock_hal_test, BASE_PADDR};
+    use crate::test_utils::{BASE_PADDR, mock_hal_test};
     use alloc::vec;
     use alloc::vec::Vec;
     use axerrno::AxError;

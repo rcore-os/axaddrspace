@@ -7,13 +7,13 @@
 extern crate log;
 extern crate alloc;
 
+mod accessor;
 mod addr;
 mod address_space;
 pub mod device;
 mod frame;
 mod hal;
 mod npt;
-mod accessor;
 
 pub use addr::*;
 pub use address_space::*;
