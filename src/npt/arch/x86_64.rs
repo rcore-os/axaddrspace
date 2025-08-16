@@ -9,7 +9,7 @@ use page_table_multiarch::{PageTable64, PagingMetaData};
 use crate::{GuestPhysAddr, HostPhysAddr};
 
 bitflags::bitflags! {
-    /// EPT entry flags. (SDM Vol. 3C, Section 28.3.2)
+    /// EPT entry flags. (SDM Vol. 3C, Section 30.3.2)
     struct EPTFlags: u64 {
         /// Read access.
         const READ =                1 << 0;
@@ -36,7 +36,10 @@ bitflags::bitflags! {
 numeric_enum_macro::numeric_enum! {
     #[repr(u8)]
     #[derive(Debug, PartialEq, Clone, Copy)]
-    /// EPT memory typing. (SDM Vol. 3C, Section 28.3.7)
+    /// EPT memory typing. (SDM Vol. 3C, Section 30.3.7)
+    /// The EPT memory type is specified in bits 5:3 of the last EPT paging-structure entry:
+    /// 0 = UC; 1 = WC; 4 = WT; 5 = WP; and 6 = WB.
+    /// Other values are reserved and cause EPT misconfigurations (see Section 30.3.3).
     enum EPTMemType {
         Uncached = 0,
         WriteCombining = 1,
@@ -72,9 +75,9 @@ impl From<MappingFlags> for EPTFlags {
         if f.contains(MappingFlags::EXECUTE) {
             ret |= Self::EXECUTE;
         }
-        if !f.contains(MappingFlags::DEVICE) {
-            ret.set_mem_type(EPTMemType::WriteBack);
-        }
+        // if !f.contains(MappingFlags::DEVICE) {
+        ret.set_mem_type(EPTMemType::WriteBack);
+        // }
         ret
     }
 }
