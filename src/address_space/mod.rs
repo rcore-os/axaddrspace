@@ -231,13 +231,6 @@ impl<M: PagingMetaData, PTE: GenericPTE, H: PagingHandler> AddrSpace<M, PTE, H> 
             let mut start = vaddr;
             let end = start.add(len);
 
-            debug!(
-                "start {:?} end {:?} area size {:#x}",
-                start,
-                end,
-                area.size()
-            );
-
             let mut v = Vec::new();
             while start < end {
                 let (start_paddr, _, page_size) = self.page_table().query(start).unwrap();
