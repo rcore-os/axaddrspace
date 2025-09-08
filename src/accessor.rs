@@ -11,26 +11,10 @@ use memory_addr::PhysAddr;
 pub trait AddressTranslator {
     /// Translate a guest physical address to host physical address
     fn translate_guest_to_host(&self, guest_addr: GuestPhysAddr) -> Option<PhysAddr>;
-}
 
-/// Guest memory access with injected translator
-#[derive(Debug, Clone)]
-pub struct GuestMemoryAccessor<T> {
-    translator: T,
-}
-
-impl<T: AddressTranslator> GuestMemoryAccessor<T> {
-    /// Create a new guest memory accessor
-    pub fn new(translator: T) -> Self {
-        Self { translator }
-    }
-}
-
-impl<T: AddressTranslator> GuestMemoryAccessor<T> {
     /// Read a value of type V from guest memory
-    pub fn read_obj<V: Copy>(&self, guest_addr: GuestPhysAddr) -> AxResult<V> {
+    fn read_obj<V: Copy>(&self, guest_addr: GuestPhysAddr) -> AxResult<V> {
         let host_addr = self
-            .translator
             .translate_guest_to_host(guest_addr)
             .ok_or(AxError::InvalidInput)?;
 
@@ -41,9 +25,8 @@ impl<T: AddressTranslator> GuestMemoryAccessor<T> {
     }
 
     /// Write a value of type V to guest memory
-    pub fn write_obj<V: Copy>(&self, guest_addr: GuestPhysAddr, val: V) -> AxResult<()> {
+    fn write_obj<V: Copy>(&self, guest_addr: GuestPhysAddr, val: V) -> AxResult<()> {
         let host_addr = self
-            .translator
             .translate_guest_to_host(guest_addr)
             .ok_or(AxError::InvalidInput)?;
 
@@ -55,9 +38,8 @@ impl<T: AddressTranslator> GuestMemoryAccessor<T> {
     }
 
     /// Read a buffer from guest memory
-    pub fn read_buffer(&self, guest_addr: GuestPhysAddr, buffer: &mut [u8]) -> AxResult<()> {
+    fn read_buffer(&self, guest_addr: GuestPhysAddr, buffer: &mut [u8]) -> AxResult<()> {
         let host_addr = self
-            .translator
             .translate_guest_to_host(guest_addr)
             .ok_or(AxError::InvalidInput)?;
 
@@ -69,9 +51,8 @@ impl<T: AddressTranslator> GuestMemoryAccessor<T> {
     }
 
     /// Write a buffer to guest memory
-    pub fn write_buffer(&self, guest_addr: GuestPhysAddr, buffer: &[u8]) -> AxResult<()> {
+    fn write_buffer(&self, guest_addr: GuestPhysAddr, buffer: &[u8]) -> AxResult<()> {
         let host_addr = self
-            .translator
             .translate_guest_to_host(guest_addr)
             .ok_or(AxError::InvalidInput)?;
 
@@ -83,12 +64,12 @@ impl<T: AddressTranslator> GuestMemoryAccessor<T> {
     }
 
     /// Read a volatile value from guest memory (for device registers)
-    pub fn read_volatile<V: Copy>(&self, guest_addr: GuestPhysAddr) -> AxResult<V> {
+    fn read_volatile<V: Copy>(&self, guest_addr: GuestPhysAddr) -> AxResult<V> {
         self.read_obj(guest_addr)
     }
 
     /// Write a volatile value to guest memory (for device registers)
-    pub fn write_volatile<V: Copy>(&self, guest_addr: GuestPhysAddr, val: V) -> AxResult<()> {
+    fn write_volatile<V: Copy>(&self, guest_addr: GuestPhysAddr, val: V) -> AxResult<()> {
         self.write_obj(guest_addr, val)
     }
 }
@@ -147,10 +128,9 @@ mod tests {
     fn test_accessor_creation() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             // Test that accessor can be created and cloned
-            let _cloned_accessor = accessor.clone();
+            let _cloned_accessor = translator.clone();
         });
     }
 
@@ -158,16 +138,15 @@ mod tests {
     fn test_read_write_obj() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             let guest_addr = GuestPhysAddr::from_usize(0x100);
             let test_value: u32 = 0x12345678;
 
             // Write a value
-            accessor.write_obj(guest_addr, test_value).unwrap();
+            translator.write_obj(guest_addr, test_value).unwrap();
 
             // Read it back
-            let read_value: u32 = accessor.read_obj(guest_addr).unwrap();
+            let read_value: u32 = translator.read_obj(guest_addr).unwrap();
             assert_eq!(read_value, test_value);
         });
     }
@@ -176,27 +155,26 @@ mod tests {
     fn test_read_write_different_types() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             // Test u8
             let guest_addr_u8 = GuestPhysAddr::from_usize(0x200);
             let test_u8: u8 = 0xAB;
-            accessor.write_obj(guest_addr_u8, test_u8).unwrap();
-            let read_u8: u8 = accessor.read_obj(guest_addr_u8).unwrap();
+            translator.write_obj(guest_addr_u8, test_u8).unwrap();
+            let read_u8: u8 = translator.read_obj(guest_addr_u8).unwrap();
             assert_eq!(read_u8, test_u8);
 
             // Test u16
             let guest_addr_u16 = GuestPhysAddr::from_usize(0x300);
             let test_u16: u16 = 0x1234;
-            accessor.write_obj(guest_addr_u16, test_u16).unwrap();
-            let read_u16: u16 = accessor.read_obj(guest_addr_u16).unwrap();
+            translator.write_obj(guest_addr_u16, test_u16).unwrap();
+            let read_u16: u16 = translator.read_obj(guest_addr_u16).unwrap();
             assert_eq!(read_u16, test_u16);
 
             // Test u64
             let guest_addr_u64 = GuestPhysAddr::from_usize(0x400);
             let test_u64: u64 = 0x123456789ABCDEF0;
-            accessor.write_obj(guest_addr_u64, test_u64).unwrap();
-            let read_u64: u64 = accessor.read_obj(guest_addr_u64).unwrap();
+            translator.write_obj(guest_addr_u64, test_u64).unwrap();
+            let read_u64: u64 = translator.read_obj(guest_addr_u64).unwrap();
             assert_eq!(read_u64, test_u64);
         });
     }
@@ -205,17 +183,18 @@ mod tests {
     fn test_read_write_buffer() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             let guest_addr = GuestPhysAddr::from_usize(0x500);
             let test_data = b"Hello, World! This is a test buffer.";
 
             // Write buffer
-            accessor.write_buffer(guest_addr, test_data).unwrap();
+            translator.write_buffer(guest_addr, test_data).unwrap();
 
             // Read buffer back
             let mut read_buffer = vec![0u8; test_data.len()];
-            accessor.read_buffer(guest_addr, &mut read_buffer).unwrap();
+            translator
+                .read_buffer(guest_addr, &mut read_buffer)
+                .unwrap();
 
             assert_eq!(read_buffer.as_slice(), test_data);
         });
@@ -225,16 +204,15 @@ mod tests {
     fn test_volatile_operations() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             let guest_addr = GuestPhysAddr::from_usize(0x600);
             let test_value: u32 = 0xDEADBEEF;
 
             // Write volatile
-            accessor.write_volatile(guest_addr, test_value).unwrap();
+            translator.write_volatile(guest_addr, test_value).unwrap();
 
             // Read volatile
-            let read_value: u32 = accessor.read_volatile(guest_addr).unwrap();
+            let read_value: u32 = translator.read_volatile(guest_addr).unwrap();
             assert_eq!(read_value, test_value);
         });
     }
@@ -243,41 +221,40 @@ mod tests {
     fn test_translation_failure() {
         mock_hal_test(|| {
             let translator = MockTranslator::new_failing();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             let guest_addr = GuestPhysAddr::from_usize(0x700);
             let test_value: u32 = 0x12345678;
 
             // All operations should fail with InvalidInput when translation fails
             assert!(matches!(
-                accessor.write_obj(guest_addr, test_value),
+                translator.write_obj(guest_addr, test_value),
                 Err(AxError::InvalidInput)
             ));
 
             assert!(matches!(
-                accessor.read_obj::<u32>(guest_addr),
+                translator.read_obj::<u32>(guest_addr),
                 Err(AxError::InvalidInput)
             ));
 
             let mut buffer = [0u8; 10];
             assert!(matches!(
-                accessor.read_buffer(guest_addr, &mut buffer),
+                translator.read_buffer(guest_addr, &mut buffer),
                 Err(AxError::InvalidInput)
             ));
 
             let test_buffer = b"test";
             assert!(matches!(
-                accessor.write_buffer(guest_addr, test_buffer),
+                translator.write_buffer(guest_addr, test_buffer),
                 Err(AxError::InvalidInput)
             ));
 
             assert!(matches!(
-                accessor.read_volatile::<u32>(guest_addr),
+                translator.read_volatile::<u32>(guest_addr),
                 Err(AxError::InvalidInput)
             ));
 
             assert!(matches!(
-                accessor.write_volatile(guest_addr, test_value),
+                translator.write_volatile(guest_addr, test_value),
                 Err(AxError::InvalidInput)
             ));
         });
@@ -287,7 +264,6 @@ mod tests {
     fn test_out_of_bounds_translation() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             // Try to access an address that's out of our mock memory range
             let guest_addr = GuestPhysAddr::from_usize(0x20000); // Beyond our 64KB test range
@@ -295,12 +271,12 @@ mod tests {
 
             // Should fail because translation returns None for out-of-bounds addresses
             assert!(matches!(
-                accessor.write_obj(guest_addr, test_value),
+                translator.write_obj(guest_addr, test_value),
                 Err(AxError::InvalidInput)
             ));
 
             assert!(matches!(
-                accessor.read_obj::<u32>(guest_addr),
+                translator.read_obj::<u32>(guest_addr),
                 Err(AxError::InvalidInput)
             ));
         });
@@ -310,18 +286,19 @@ mod tests {
     fn test_zero_length_buffer() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             let guest_addr = GuestPhysAddr::from_usize(0x800);
 
             // Test with zero-length buffers
             let empty_write_buffer: &[u8] = &[];
-            accessor
+            translator
                 .write_buffer(guest_addr, empty_write_buffer)
                 .unwrap();
 
             let empty_read_buffer: &mut [u8] = &mut [];
-            accessor.read_buffer(guest_addr, empty_read_buffer).unwrap();
+            translator
+                .read_buffer(guest_addr, empty_read_buffer)
+                .unwrap();
         });
     }
 
@@ -329,7 +306,6 @@ mod tests {
     fn test_large_buffer() {
         mock_hal_test(|| {
             let translator = MockTranslator::new();
-            let accessor = GuestMemoryAccessor::new(translator);
 
             let guest_addr = GuestPhysAddr::from_usize(0x1000);
 
@@ -337,11 +313,13 @@ mod tests {
             let large_data: Vec<u8> = (0..1000).map(|i| (i % 256) as u8).collect();
 
             // Write large buffer
-            accessor.write_buffer(guest_addr, &large_data).unwrap();
+            translator.write_buffer(guest_addr, &large_data).unwrap();
 
             // Read it back
             let mut read_buffer = vec![0u8; large_data.len()];
-            accessor.read_buffer(guest_addr, &mut read_buffer).unwrap();
+            translator
+                .read_buffer(guest_addr, &mut read_buffer)
+                .unwrap();
 
             assert_eq!(read_buffer, large_data);
         });

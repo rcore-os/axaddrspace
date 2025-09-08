@@ -21,7 +21,7 @@ pub use address_space::*;
 pub use frame::PhysFrame;
 pub use hal::AxMmHal;
 
-pub use accessor::{AddressTranslator, GuestMemoryAccessor};
+pub use accessor::AddressTranslator;
 
 use axerrno::AxError;
 use memory_set::MappingError;
