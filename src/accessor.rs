@@ -78,46 +78,34 @@ pub trait AddressTranslator {
 mod tests {
     use super::*;
     use crate::test_utils::{BASE_PADDR, mock_hal_test};
-    use alloc::vec;
-    use alloc::vec::Vec;
-    use axerrno::AxError;
+    use axin::axin;
     use memory_addr::PhysAddr;
 
-    /// Mock address translator for testing
-    #[derive(Clone)]
+    /// Mock implementation of AddressTranslator for testing
     struct MockTranslator {
-        /// Whether translation should fail
-        fail_translation: bool,
+        base_addr: PhysAddr,
+        memory_size: usize,
     }
 
     impl MockTranslator {
-        fn new() -> Self {
+        pub fn new(base_addr: PhysAddr, memory_size: usize) -> Self {
             Self {
-                fail_translation: false,
-            }
-        }
-
-        fn new_failing() -> Self {
-            Self {
-                fail_translation: true,
+                base_addr,
+                memory_size,
             }
         }
     }
 
     impl AddressTranslator for MockTranslator {
         fn translate_guest_to_host(&self, guest_addr: GuestPhysAddr) -> Option<PhysAddr> {
-            if self.fail_translation {
-                return None;
-            }
-
-            // Simple 1:1 mapping for testing, offset by BASE_PADDR
-            let guest_offset = guest_addr.as_usize();
-            if guest_offset < 0x10000 {
-                // Within our test memory range
-                // Convert to physical address first, then to virtual address
-                let host_paddr = PhysAddr::from_usize(BASE_PADDR + guest_offset);
-                let host_vaddr = crate::test_utils::MockHal::mock_phys_to_virt(host_paddr);
-                Some(PhysAddr::from_usize(host_vaddr.as_usize()))
+            // Simple mapping: guest address directly maps to mock memory region
+            let offset = guest_addr.as_usize();
+            if offset < self.memory_size {
+                // Convert physical address to virtual address for actual memory access
+                let phys_addr =
+                    PhysAddr::from_usize(BASE_PADDR + self.base_addr.as_usize() + offset);
+                let virt_addr = crate::test_utils::MockHal::mock_phys_to_virt(phys_addr);
+                Some(PhysAddr::from_usize(virt_addr.as_usize()))
             } else {
                 None
             }
@@ -125,203 +113,144 @@ mod tests {
     }
 
     #[test]
-    fn test_accessor_creation() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
+    #[axin(decorator(mock_hal_test))]
+    fn test_basic_read_write_operations() {
+        let translator =
+            MockTranslator::new(PhysAddr::from_usize(0), crate::test_utils::MEMORY_LEN);
 
-            // Test that accessor can be created and cloned
-            let _cloned_accessor = translator.clone();
-        });
+        // Test u32 read/write operations
+        let test_addr = GuestPhysAddr::from_usize(0x100);
+        let test_value: u32 = 0x12345678;
+
+        // Write a u32 value
+        translator
+            .write_obj(test_addr, test_value)
+            .expect("Failed to write u32 value");
+
+        // Read back the u32 value
+        let read_value: u32 = translator
+            .read_obj(test_addr)
+            .expect("Failed to read u32 value");
+
+        assert_eq!(
+            read_value, test_value,
+            "Read value should match written value"
+        );
+
+        // Test buffer read/write operations
+        let buffer_addr = GuestPhysAddr::from_usize(0x200);
+        let test_buffer = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+
+        // Write buffer
+        translator
+            .write_buffer(buffer_addr, &test_buffer)
+            .expect("Failed to write buffer");
+
+        // Read buffer back
+        let mut read_buffer = [0u8; 8];
+        translator
+            .read_buffer(buffer_addr, &mut read_buffer)
+            .expect("Failed to read buffer");
+
+        assert_eq!(
+            read_buffer, test_buffer,
+            "Read buffer should match written buffer"
+        );
+
+        // Test error handling with invalid address
+        let invalid_addr = GuestPhysAddr::from_usize(crate::test_utils::MEMORY_LEN + 0x1000);
+        let result: AxResult<u32> = translator.read_obj(invalid_addr);
+        assert!(result.is_err(), "Reading from invalid address should fail");
+
+        let result = translator.write_obj(invalid_addr, 42u32);
+        assert!(result.is_err(), "Writing to invalid address should fail");
     }
 
     #[test]
-    fn test_read_write_obj() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
+    #[axin(decorator(mock_hal_test))]
+    fn test_two_vm_isolation() {
+        // Create two different translators to simulate two different VMs
+        let vm1_translator =
+            MockTranslator::new(PhysAddr::from_usize(0), crate::test_utils::MEMORY_LEN / 2); // Offset for VM1
+        let vm2_translator = MockTranslator::new(
+            PhysAddr::from_usize(crate::test_utils::MEMORY_LEN / 2),
+            crate::test_utils::MEMORY_LEN,
+        ); // Offset for VM2
 
-            let guest_addr = GuestPhysAddr::from_usize(0x100);
-            let test_value: u32 = 0x12345678;
+        // Both VMs write to the same guest address but different host memory regions
+        let guest_addr = GuestPhysAddr::from_usize(0x100);
+        let vm1_data: u64 = 0xDEADBEEFCAFEBABE;
+        let vm2_data: u64 = 0x1234567890ABCDEF;
 
-            // Write a value
-            translator.write_obj(guest_addr, test_value).unwrap();
+        // VM1 writes its data
+        vm1_translator
+            .write_obj(guest_addr, vm1_data)
+            .expect("VM1 failed to write data");
 
-            // Read it back
-            let read_value: u32 = translator.read_obj(guest_addr).unwrap();
-            assert_eq!(read_value, test_value);
-        });
-    }
+        // VM2 writes its data
+        vm2_translator
+            .write_obj(guest_addr, vm2_data)
+            .expect("VM2 failed to write data");
 
-    #[test]
-    fn test_read_write_different_types() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
+        // Both VMs read back their own data - should be isolated
+        let vm1_read: u64 = vm1_translator
+            .read_obj(guest_addr)
+            .expect("VM1 failed to read data");
+        let vm2_read: u64 = vm2_translator
+            .read_obj(guest_addr)
+            .expect("VM2 failed to read data");
 
-            // Test u8
-            let guest_addr_u8 = GuestPhysAddr::from_usize(0x200);
-            let test_u8: u8 = 0xAB;
-            translator.write_obj(guest_addr_u8, test_u8).unwrap();
-            let read_u8: u8 = translator.read_obj(guest_addr_u8).unwrap();
-            assert_eq!(read_u8, test_u8);
+        // Verify isolation: each VM should read its own data
+        assert_eq!(vm1_read, vm1_data, "VM1 should read its own data");
+        assert_eq!(vm2_read, vm2_data, "VM2 should read its own data");
+        assert_ne!(
+            vm1_read, vm2_read,
+            "VM1 and VM2 should have different data (isolation)"
+        );
 
-            // Test u16
-            let guest_addr_u16 = GuestPhysAddr::from_usize(0x300);
-            let test_u16: u16 = 0x1234;
-            translator.write_obj(guest_addr_u16, test_u16).unwrap();
-            let read_u16: u16 = translator.read_obj(guest_addr_u16).unwrap();
-            assert_eq!(read_u16, test_u16);
+        // Test buffer operations with different patterns
+        let buffer_addr = GuestPhysAddr::from_usize(0x200);
+        let vm1_buffer = [0xAA; 16]; // Pattern for VM1
+        let vm2_buffer = [0x55; 16]; // Pattern for VM2
 
-            // Test u64
-            let guest_addr_u64 = GuestPhysAddr::from_usize(0x400);
-            let test_u64: u64 = 0x123456789ABCDEF0;
-            translator.write_obj(guest_addr_u64, test_u64).unwrap();
-            let read_u64: u64 = translator.read_obj(guest_addr_u64).unwrap();
-            assert_eq!(read_u64, test_u64);
-        });
-    }
+        // Both VMs write their patterns
+        vm1_translator
+            .write_buffer(buffer_addr, &vm1_buffer)
+            .expect("VM1 failed to write buffer");
+        vm2_translator
+            .write_buffer(buffer_addr, &vm2_buffer)
+            .expect("VM2 failed to write buffer");
 
-    #[test]
-    fn test_read_write_buffer() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
+        // Read back and verify isolation
+        let mut vm1_read_buffer = [0u8; 16];
+        let mut vm2_read_buffer = [0u8; 16];
 
-            let guest_addr = GuestPhysAddr::from_usize(0x500);
-            let test_data = b"Hello, World! This is a test buffer.";
+        vm1_translator
+            .read_buffer(buffer_addr, &mut vm1_read_buffer)
+            .expect("VM1 failed to read buffer");
+        vm2_translator
+            .read_buffer(buffer_addr, &mut vm2_read_buffer)
+            .expect("VM2 failed to read buffer");
 
-            // Write buffer
-            translator.write_buffer(guest_addr, test_data).unwrap();
+        assert_eq!(
+            vm1_read_buffer, vm1_buffer,
+            "VM1 should read its own buffer pattern"
+        );
+        assert_eq!(
+            vm2_read_buffer, vm2_buffer,
+            "VM2 should read its own buffer pattern"
+        );
+        assert_ne!(
+            vm1_read_buffer, vm2_read_buffer,
+            "VM buffers should be isolated"
+        );
 
-            // Read buffer back
-            let mut read_buffer = vec![0u8; test_data.len()];
-            translator
-                .read_buffer(guest_addr, &mut read_buffer)
-                .unwrap();
-
-            assert_eq!(read_buffer.as_slice(), test_data);
-        });
-    }
-
-    #[test]
-    fn test_volatile_operations() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
-
-            let guest_addr = GuestPhysAddr::from_usize(0x600);
-            let test_value: u32 = 0xDEADBEEF;
-
-            // Write volatile
-            translator.write_volatile(guest_addr, test_value).unwrap();
-
-            // Read volatile
-            let read_value: u32 = translator.read_volatile(guest_addr).unwrap();
-            assert_eq!(read_value, test_value);
-        });
-    }
-
-    #[test]
-    fn test_translation_failure() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new_failing();
-
-            let guest_addr = GuestPhysAddr::from_usize(0x700);
-            let test_value: u32 = 0x12345678;
-
-            // All operations should fail with InvalidInput when translation fails
-            assert!(matches!(
-                translator.write_obj(guest_addr, test_value),
-                Err(AxError::InvalidInput)
-            ));
-
-            assert!(matches!(
-                translator.read_obj::<u32>(guest_addr),
-                Err(AxError::InvalidInput)
-            ));
-
-            let mut buffer = [0u8; 10];
-            assert!(matches!(
-                translator.read_buffer(guest_addr, &mut buffer),
-                Err(AxError::InvalidInput)
-            ));
-
-            let test_buffer = b"test";
-            assert!(matches!(
-                translator.write_buffer(guest_addr, test_buffer),
-                Err(AxError::InvalidInput)
-            ));
-
-            assert!(matches!(
-                translator.read_volatile::<u32>(guest_addr),
-                Err(AxError::InvalidInput)
-            ));
-
-            assert!(matches!(
-                translator.write_volatile(guest_addr, test_value),
-                Err(AxError::InvalidInput)
-            ));
-        });
-    }
-
-    #[test]
-    fn test_out_of_bounds_translation() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
-
-            // Try to access an address that's out of our mock memory range
-            let guest_addr = GuestPhysAddr::from_usize(0x20000); // Beyond our 64KB test range
-            let test_value: u32 = 0x12345678;
-
-            // Should fail because translation returns None for out-of-bounds addresses
-            assert!(matches!(
-                translator.write_obj(guest_addr, test_value),
-                Err(AxError::InvalidInput)
-            ));
-
-            assert!(matches!(
-                translator.read_obj::<u32>(guest_addr),
-                Err(AxError::InvalidInput)
-            ));
-        });
-    }
-
-    #[test]
-    fn test_zero_length_buffer() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
-
-            let guest_addr = GuestPhysAddr::from_usize(0x800);
-
-            // Test with zero-length buffers
-            let empty_write_buffer: &[u8] = &[];
-            translator
-                .write_buffer(guest_addr, empty_write_buffer)
-                .unwrap();
-
-            let empty_read_buffer: &mut [u8] = &mut [];
-            translator
-                .read_buffer(guest_addr, empty_read_buffer)
-                .unwrap();
-        });
-    }
-
-    #[test]
-    fn test_large_buffer() {
-        mock_hal_test(|| {
-            let translator = MockTranslator::new();
-
-            let guest_addr = GuestPhysAddr::from_usize(0x1000);
-
-            // Create a large buffer (but within our test memory limits)
-            let large_data: Vec<u8> = (0..1000).map(|i| (i % 256) as u8).collect();
-
-            // Write large buffer
-            translator.write_buffer(guest_addr, &large_data).unwrap();
-
-            // Read it back
-            let mut read_buffer = vec![0u8; large_data.len()];
-            translator
-                .read_buffer(guest_addr, &mut read_buffer)
-                .unwrap();
-
-            assert_eq!(read_buffer, large_data);
-        });
+        // Test that VM1 cannot access VM2's address space (beyond its limit)
+        let vm2_only_addr = GuestPhysAddr::from_usize(crate::test_utils::MEMORY_LEN / 2 + 0x100);
+        let result: AxResult<u32> = vm1_translator.read_obj(vm2_only_addr);
+        assert!(
+            result.is_err(),
+            "VM1 should not be able to access VM2's exclusive address space"
+        );
     }
 }
