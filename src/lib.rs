@@ -7,8 +7,8 @@
 extern crate log;
 extern crate alloc;
 
-mod addr_translator;
 mod addr;
+mod addr_translator;
 mod address_space;
 pub mod device;
 mod frame;
