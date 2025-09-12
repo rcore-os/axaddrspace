@@ -5,45 +5,27 @@
 //! memory safety concerns.
 use crate::GuestPhysAddr;
 use axerrno::{AxError, AxResult};
-use memory_addr::{PAGE_SIZE_4K, PhysAddr};
+use memory_addr::PhysAddr;
 
-/// Trait for address translation
-pub trait AddressTranslator {
-    /// Translate a guest physical address to host physical address
-    fn translate_guest_to_host(&self, guest_addr: GuestPhysAddr) -> Option<PhysAddr>;
-
-    /// Get the page size for a given guest address
+/// A stateful accessor to the memory space of a guest
+pub trait GuestMemoryAccessor {
+    /// Translate a guest physical address to host physical address and get access limit
     ///
-    /// This allows implementations to provide actual page size information
-    /// based on their memory management configuration.
-    /// Default implementation returns 4KB page size.
-    fn get_page_size(&self, _guest_addr: GuestPhysAddr) -> usize {
-        PAGE_SIZE_4K
-    }
-
-    /// Check if an access crosses page boundary
-    ///
-    /// This function checks whether accessing `size` bytes starting from `guest_addr`
-    /// would cross the boundary of a page. Uses the page size from get_page_size().
-    /// Default implementation provides standard page boundary checking logic.
-    fn crosses_page_boundary(&self, guest_addr: GuestPhysAddr, size: usize) -> bool {
-        if size == 0 {
-            return false;
-        }
-
-        let page_size = self.get_page_size(guest_addr);
-        let start_page = guest_addr.as_usize() & !(page_size - 1);
-        let end_addr = guest_addr.as_usize() + size - 1;
-        let end_page = end_addr & !(page_size - 1);
-
-        start_page != end_page
-    }
+    /// Returns a tuple of (host_physical_address, accessible_size) if the translation
+    /// is successful. The accessible_size indicates how many bytes can be safely
+    /// accessed starting from the given guest address.
+    fn translate_and_get_limit(&self, guest_addr: GuestPhysAddr) -> Option<(PhysAddr, usize)>;
 
     /// Read a value of type V from guest memory
     fn read_obj<V: Copy>(&self, guest_addr: GuestPhysAddr) -> AxResult<V> {
-        let host_addr = self
-            .translate_guest_to_host(guest_addr)
+        let (host_addr, limit) = self
+            .translate_and_get_limit(guest_addr)
             .ok_or(AxError::InvalidInput)?;
+
+        // Check if we have enough space to read the object
+        if limit < core::mem::size_of::<V>() {
+            return Err(AxError::InvalidInput);
+        }
 
         unsafe {
             let ptr = host_addr.as_usize() as *const V;
@@ -53,9 +35,14 @@ pub trait AddressTranslator {
 
     /// Write a value of type V to guest memory
     fn write_obj<V: Copy>(&self, guest_addr: GuestPhysAddr, val: V) -> AxResult<()> {
-        let host_addr = self
-            .translate_guest_to_host(guest_addr)
+        let (host_addr, limit) = self
+            .translate_and_get_limit(guest_addr)
             .ok_or(AxError::InvalidInput)?;
+
+        // Check if we have enough space to write the object
+        if limit < core::mem::size_of::<V>() {
+            return Err(AxError::InvalidInput);
+        }
 
         unsafe {
             let ptr = host_addr.as_usize() as *mut V;
@@ -70,13 +57,13 @@ pub trait AddressTranslator {
             return Ok(());
         }
 
-        // Check if the access crosses page boundary using the trait method
-        if !self.crosses_page_boundary(guest_addr, buffer.len()) {
-            // Simple case: single page access
-            let host_addr = self
-                .translate_guest_to_host(guest_addr)
-                .ok_or(AxError::InvalidInput)?;
+        let (host_addr, accessible_size) = self
+            .translate_and_get_limit(guest_addr)
+            .ok_or(AxError::InvalidInput)?;
 
+        // Check if we can read the entire buffer from this accessible region
+        if accessible_size >= buffer.len() {
+            // Simple case: entire buffer fits within accessible region
             unsafe {
                 let src_ptr = host_addr.as_usize() as *const u8;
                 core::ptr::copy_nonoverlapping(src_ptr, buffer.as_mut_ptr(), buffer.len());
@@ -84,27 +71,20 @@ pub trait AddressTranslator {
             return Ok(());
         }
 
-        // Complex case: cross-page access, handle page by page
+        // Complex case: buffer spans multiple regions, handle region by region
         let mut current_guest_addr = guest_addr;
         let mut remaining_buffer = buffer;
 
         while !remaining_buffer.is_empty() {
-            // Get page size for current address
-            let page_size = self.get_page_size(current_guest_addr);
-
-            // Calculate how much we can read from current page
-            let page_offset = current_guest_addr.as_usize() & (page_size - 1);
-            let bytes_in_current_page = page_size - page_offset;
-            let bytes_to_read = remaining_buffer.len().min(bytes_in_current_page);
-
-            // Translate current page address
-            let host_addr = self
-                .translate_guest_to_host(current_guest_addr)
+            let (current_host_addr, current_accessible_size) = self
+                .translate_and_get_limit(current_guest_addr)
                 .ok_or(AxError::InvalidInput)?;
 
-            // Read from current page
+            let bytes_to_read = remaining_buffer.len().min(current_accessible_size);
+
+            // Read from current accessible region
             unsafe {
-                let src_ptr = host_addr.as_usize() as *const u8;
+                let src_ptr = current_host_addr.as_usize() as *const u8;
                 core::ptr::copy_nonoverlapping(
                     src_ptr,
                     remaining_buffer.as_mut_ptr(),
@@ -112,7 +92,7 @@ pub trait AddressTranslator {
                 );
             }
 
-            // Move to next page
+            // Move to next region
             current_guest_addr =
                 GuestPhysAddr::from_usize(current_guest_addr.as_usize() + bytes_to_read);
             remaining_buffer = &mut remaining_buffer[bytes_to_read..];
@@ -127,13 +107,13 @@ pub trait AddressTranslator {
             return Ok(());
         }
 
-        // Check if the access crosses page boundary using the trait method
-        if !self.crosses_page_boundary(guest_addr, buffer.len()) {
-            // Simple case: single page access
-            let host_addr = self
-                .translate_guest_to_host(guest_addr)
-                .ok_or(AxError::InvalidInput)?;
+        let (host_addr, accessible_size) = self
+            .translate_and_get_limit(guest_addr)
+            .ok_or(AxError::InvalidInput)?;
 
+        // Check if we can write the entire buffer to this accessible region
+        if accessible_size >= buffer.len() {
+            // Simple case: entire buffer fits within accessible region
             unsafe {
                 let dst_ptr = host_addr.as_usize() as *mut u8;
                 core::ptr::copy_nonoverlapping(buffer.as_ptr(), dst_ptr, buffer.len());
@@ -141,31 +121,24 @@ pub trait AddressTranslator {
             return Ok(());
         }
 
-        // Complex case: cross-page access, handle page by page
+        // Complex case: buffer spans multiple regions, handle region by region
         let mut current_guest_addr = guest_addr;
         let mut remaining_buffer = buffer;
 
         while !remaining_buffer.is_empty() {
-            // Get page size for current address
-            let page_size = self.get_page_size(current_guest_addr);
-
-            // Calculate how much we can write to current page
-            let page_offset = current_guest_addr.as_usize() & (page_size - 1);
-            let bytes_in_current_page = page_size - page_offset;
-            let bytes_to_write = remaining_buffer.len().min(bytes_in_current_page);
-
-            // Translate current page address
-            let host_addr = self
-                .translate_guest_to_host(current_guest_addr)
+            let (current_host_addr, current_accessible_size) = self
+                .translate_and_get_limit(current_guest_addr)
                 .ok_or(AxError::InvalidInput)?;
 
-            // Write to current page
+            let bytes_to_write = remaining_buffer.len().min(current_accessible_size);
+
+            // Write to current accessible region
             unsafe {
-                let dst_ptr = host_addr.as_usize() as *mut u8;
+                let dst_ptr = current_host_addr.as_usize() as *mut u8;
                 core::ptr::copy_nonoverlapping(remaining_buffer.as_ptr(), dst_ptr, bytes_to_write);
             }
 
-            // Move to next page
+            // Move to next region
             current_guest_addr =
                 GuestPhysAddr::from_usize(current_guest_addr.as_usize() + bytes_to_write);
             remaining_buffer = &remaining_buffer[bytes_to_write..];
@@ -192,7 +165,7 @@ mod tests {
     use axin::axin;
     use memory_addr::PhysAddr;
 
-    /// Mock implementation of AddressTranslator for testing
+    /// Mock implementation of GuestMemoryAccessor for testing
     struct MockTranslator {
         base_addr: PhysAddr,
         memory_size: usize,
@@ -207,8 +180,8 @@ mod tests {
         }
     }
 
-    impl AddressTranslator for MockTranslator {
-        fn translate_guest_to_host(&self, guest_addr: GuestPhysAddr) -> Option<PhysAddr> {
+    impl GuestMemoryAccessor for MockTranslator {
+        fn translate_and_get_limit(&self, guest_addr: GuestPhysAddr) -> Option<(PhysAddr, usize)> {
             // Simple mapping: guest address directly maps to mock memory region
             let offset = guest_addr.as_usize();
             if offset < self.memory_size {
@@ -216,7 +189,8 @@ mod tests {
                 let phys_addr =
                     PhysAddr::from_usize(BASE_PADDR + self.base_addr.as_usize() + offset);
                 let virt_addr = crate::test_utils::MockHal::mock_phys_to_virt(phys_addr);
-                Some(PhysAddr::from_usize(virt_addr.as_usize()))
+                let accessible_size = self.memory_size - offset;
+                Some((PhysAddr::from_usize(virt_addr.as_usize()), accessible_size))
             } else {
                 None
             }
@@ -371,40 +345,33 @@ mod tests {
         let translator =
             MockTranslator::new(PhysAddr::from_usize(0), crate::test_utils::MEMORY_LEN);
 
-        // Test cross-page buffer operations
-        // Place buffer near page boundary to ensure it crosses pages (assuming 4K pages)
-        let page_size = 4096;
-        let cross_page_addr = GuestPhysAddr::from_usize(page_size - 8); // 8 bytes before page boundary
+        // Test cross-region buffer operations
+        // Place buffer near a region boundary to test multi-region access
+        let cross_region_addr = GuestPhysAddr::from_usize(4096 - 8); // 8 bytes before 4K boundary
         let test_data = [
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
             0x0F, 0x10,
-        ]; // 16 bytes (crosses page)
+        ]; // 16 bytes
 
-        // Verify the buffer actually crosses page boundary
-        assert!(
-            translator.crosses_page_boundary(cross_page_addr, test_data.len()),
-            "Test buffer should cross page boundary"
-        );
-
-        // Write cross-page data
+        // Write cross-region data
         translator
-            .write_buffer(cross_page_addr, &test_data)
-            .expect("Failed to write cross-page buffer");
+            .write_buffer(cross_region_addr, &test_data)
+            .expect("Failed to write cross-region buffer");
 
-        // Read cross-page data back
+        // Read cross-region data back
         let mut read_data = [0u8; 16];
         translator
-            .read_buffer(cross_page_addr, &mut read_data)
-            .expect("Failed to read cross-page buffer");
+            .read_buffer(cross_region_addr, &mut read_data)
+            .expect("Failed to read cross-region buffer");
 
         assert_eq!(
             read_data, test_data,
-            "Cross-page read should match written data"
+            "Cross-region read should match written data"
         );
 
-        // Test individual byte access across page boundary
+        // Test individual byte access across region boundary
         for (i, &expected_byte) in test_data.iter().enumerate() {
-            let byte_addr = GuestPhysAddr::from_usize(cross_page_addr.as_usize() + i);
+            let byte_addr = GuestPhysAddr::from_usize(cross_region_addr.as_usize() + i);
             let read_byte: u8 = translator
                 .read_obj(byte_addr)
                 .expect("Failed to read individual byte");
@@ -418,50 +385,39 @@ mod tests {
 
     #[test]
     #[axin(decorator(mock_hal_test))]
-    fn test_page_boundary_edge_cases() {
+    fn test_region_boundary_edge_cases() {
         let translator =
             MockTranslator::new(PhysAddr::from_usize(0), crate::test_utils::MEMORY_LEN);
 
-        let page_size = 4096;
-
-        // Test exactly at page boundary
-        let page_boundary_addr = GuestPhysAddr::from_usize(page_size);
+        let boundary_addr = GuestPhysAddr::from_usize(4096);
         let boundary_data = [0xAB, 0xCD, 0xEF, 0x12];
 
         translator
-            .write_buffer(page_boundary_addr, &boundary_data)
-            .expect("Failed to write at page boundary");
+            .write_buffer(boundary_addr, &boundary_data)
+            .expect("Failed to write at boundary");
 
         let mut read_boundary = [0u8; 4];
         translator
-            .read_buffer(page_boundary_addr, &mut read_boundary)
-            .expect("Failed to read at page boundary");
+            .read_buffer(boundary_addr, &mut read_boundary)
+            .expect("Failed to read at boundary");
 
-        assert_eq!(
-            read_boundary, boundary_data,
-            "Page boundary data should match"
-        );
+        assert_eq!(read_boundary, boundary_data, "Boundary data should match");
 
-        // Test zero-size buffer (should not cross any boundary)
+        // Test zero-size buffer (should not fail)
         let empty_buffer: &[u8] = &[];
         translator
-            .write_buffer(page_boundary_addr, empty_buffer)
+            .write_buffer(boundary_addr, empty_buffer)
             .expect("Empty buffer write should succeed");
 
         let mut empty_read: &mut [u8] = &mut [];
         translator
-            .read_buffer(page_boundary_addr, &mut empty_read)
+            .read_buffer(boundary_addr, &mut empty_read)
             .expect("Empty buffer read should succeed");
 
-        // Test single byte at page boundary (should not cross)
+        // Test single byte at boundary (should work fine)
         let single_byte = [0x42];
-        assert!(
-            !translator.crosses_page_boundary(page_boundary_addr, 1),
-            "Single byte should not cross page boundary"
-        );
-
         translator
-            .write_buffer(page_boundary_addr, &single_byte)
+            .write_buffer(boundary_addr, &single_byte)
             .expect("Single byte write should succeed");
     }
 }

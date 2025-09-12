@@ -8,7 +8,7 @@ extern crate log;
 extern crate alloc;
 
 mod addr;
-mod addr_translator;
+mod memory_accessor;
 mod address_space;
 pub mod device;
 mod frame;
@@ -21,7 +21,7 @@ pub use address_space::*;
 pub use frame::PhysFrame;
 pub use hal::AxMmHal;
 
-pub use addr_translator::AddressTranslator;
+pub use memory_accessor::GuestMemoryAccessor;
 
 use axerrno::AxError;
 use memory_set::MappingError;
