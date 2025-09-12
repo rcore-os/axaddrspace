@@ -8,11 +8,11 @@ extern crate log;
 extern crate alloc;
 
 mod addr;
-mod memory_accessor;
 mod address_space;
 pub mod device;
 mod frame;
 mod hal;
+mod memory_accessor;
 mod npt;
 
 pub use addr::*;
