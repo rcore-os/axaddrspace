@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Backend"],"mod":["device"],"struct":["AddrSpace","GuestPhysAddr","GuestVirtAddr","MappingFlags","NestedPageFaultInfo","PhysFrame"],"trait":["AxMmHal","GuestMemoryAccessor"],"type":["GuestPhysAddrRange","GuestVirtAddrRange","HostPhysAddr","HostVirtAddr"]};
