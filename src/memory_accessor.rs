@@ -19,14 +19,14 @@ pub trait GuestMemoryAccessor {
     /// Read a value of type V from guest memory
     ///
     /// # Returns
-    /// 
+    ///
     /// Returns `Err(AxError::InvalidInput)` in the following cases:
     /// - The guest address cannot be translated to a valid host address
-    /// - The accessible memory region starting from the guest address is smaller 
+    /// - The accessible memory region starting from the guest address is smaller
     ///   than the size of type V (insufficient space for the read operation)
     ///
     /// # Safety
-    /// 
+    ///
     /// This function uses volatile memory access to ensure the read operation
     /// is not optimized away by the compiler, which is important for device
     /// register access and shared memory scenarios.
@@ -49,14 +49,14 @@ pub trait GuestMemoryAccessor {
     /// Write a value of type V to guest memory
     ///
     /// # Returns
-    /// 
+    ///
     /// Returns `Err(AxError::InvalidInput)` in the following cases:
     /// - The guest address cannot be translated to a valid host address
-    /// - The accessible memory region starting from the guest address is smaller 
+    /// - The accessible memory region starting from the guest address is smaller
     ///   than the size of type V (insufficient space for the write operation)
     ///
     /// # Safety
-    /// 
+    ///
     /// This function uses volatile memory access to ensure the write operation
     /// is not optimized away by the compiler, which is important for device
     /// register access and shared memory scenarios.
