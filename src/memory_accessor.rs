@@ -17,6 +17,19 @@ pub trait GuestMemoryAccessor {
     fn translate_and_get_limit(&self, guest_addr: GuestPhysAddr) -> Option<(PhysAddr, usize)>;
 
     /// Read a value of type V from guest memory
+    ///
+    /// # Returns
+    /// 
+    /// Returns `Err(AxError::InvalidInput)` in the following cases:
+    /// - The guest address cannot be translated to a valid host address
+    /// - The accessible memory region starting from the guest address is smaller 
+    ///   than the size of type V (insufficient space for the read operation)
+    ///
+    /// # Safety
+    /// 
+    /// This function uses volatile memory access to ensure the read operation
+    /// is not optimized away by the compiler, which is important for device
+    /// register access and shared memory scenarios.
     fn read_obj<V: Copy>(&self, guest_addr: GuestPhysAddr) -> AxResult<V> {
         let (host_addr, limit) = self
             .translate_and_get_limit(guest_addr)
@@ -34,6 +47,19 @@ pub trait GuestMemoryAccessor {
     }
 
     /// Write a value of type V to guest memory
+    ///
+    /// # Returns
+    /// 
+    /// Returns `Err(AxError::InvalidInput)` in the following cases:
+    /// - The guest address cannot be translated to a valid host address
+    /// - The accessible memory region starting from the guest address is smaller 
+    ///   than the size of type V (insufficient space for the write operation)
+    ///
+    /// # Safety
+    /// 
+    /// This function uses volatile memory access to ensure the write operation
+    /// is not optimized away by the compiler, which is important for device
+    /// register access and shared memory scenarios.
     fn write_obj<V: Copy>(&self, guest_addr: GuestPhysAddr, val: V) -> AxResult<()> {
         let (host_addr, limit) = self
             .translate_and_get_limit(guest_addr)
